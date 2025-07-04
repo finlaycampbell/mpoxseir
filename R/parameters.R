@@ -1,9 +1,9 @@
 
 ##' A function that returns the demographic parameters for use in the model
-##' 
+##'
 ##' @title Get demographic parameters
-##' 
-##' @param region The region for the parameters, must be either `"equateur"`, 
+##'
+##' @param region The region for the parameters, must be either `"equateur"`,
 ##'   `"sudkivu"`, `"burundi"` or `"bujumbura"`
 ##' @param mixing_matrix The mixing matrix must be either `"Zimbabwe"`,
 ##'  `"synthetic_home"`, or `"synthetic_all"`
@@ -13,13 +13,13 @@
 ##'   the default value for the region given in the package
 ##' @param p_HCW The proportion of HCW-age groups that are healthcare workers. Default is NULL, in which the default values for DRC and Burundi are used.
 ##' @return A list containing all the demographic parameters
-##'   
+##'
 ##' @export
 ##' @importFrom stats dmultinom
 ##' @importFrom stats setNames
 ##' @importFrom squire get_population
 ##' @importFrom squire get_mixing_matrix
-##' 
+##'
 ##' @export
 parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
                                    p_SW = NULL,
@@ -28,7 +28,7 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   squire_age_bins <- create_age_bins(start = seq(0, 75, 5))
   group_bins <- get_group_bins()
   row.names(group_bins) <- group_bins$label
-  
+
   ## Set up population denominators
   if(region %in% c("equateur","sudkivu")){
   country <- "Democratic Republic of Congo"
@@ -37,7 +37,7 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   }
 
   data <- squire::get_population(country)
-  
+
   ## combine 75+
   N_age_squire <- c(data$n[1:15], sum(data$n[16:17]))
   names(N_age_squire) <- squire_age_bins$label
@@ -49,24 +49,24 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   p_10to14_in_12to14 <- 1 - p_10to14_in_05to11
   N_age["5-11"] <- N_age_squire["5-9"] + p_10to14_in_05to11 * N_age_squire["10-14"]
   N_age["12-14"] <- p_10to14_in_12to14 * N_age_squire["10-14"]
-  
+
   ## Add in (child/adult) sex workers, (C/ASW), people who buy sex (PBS),
   ## and healthcare workers (HCW)
-  
+
   ## CSW: age 12-17
-  
+
   w_CSW <- proportion_in_age_bins(group_bins["CSW", "start"],
                                   group_bins["CSW", "end"])
   # 60% 10-14 + 60% 15-19
   N_CSW <- N_age * w_CSW
-  
+
   ## ASW: age 18-49
   w_ASW  <- proportion_in_age_bins(group_bins["ASW", "start"],
                                    group_bins["ASW", "end"])
   N_ASW <- N_age * w_ASW
-  
+
   if (region == "equateur") {
-    p_SW_default <- 0.007 * 0.5 
+    p_SW_default <- 0.007 * 0.5
     # 0.7% women (50%) 15-49 Laga et al - assume this holds down to age 12
   } else if (region == "sudkivu"){
     p_SW_default <- 0.03 * 0.5 # WHO press release
@@ -75,42 +75,43 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   } else if (region %in% c("bujumbura","bujumbura_mairie")){
     p_poss_SW  <-  sum(N_ASW + N_CSW)/ sum(N_age)
     p_SW_default <- 3852 / (792503 * p_poss_SW)
-    ## key pops report, taken as median of Bujumbura Mairie in Figure 7 
+    ## key pops report, taken as median of Bujumbura Mairie in Figure 7
   }
-  
+
   p_SW <- p_SW %||% p_SW_default
-  
+
   N_CSW <- round(p_SW * N_CSW)
   N_ASW <- round(p_SW * N_ASW)
-  
+
   ## HCW / PBS: age 20-49
   w_PBS <- proportion_in_age_bins(group_bins["PBS", "start"],
                                   group_bins["PBS", "end"])
   N_PBS <- N_age * w_PBS
-  
+
   ## PBS
   # not changing this based on age as we only heard about young SWs not young PBS
   p_PBS <- 0.11 * 0.5 # 11% men (50%) 15-49 DHS https://www.statcompiler.com/en/
   # we assume all greater than 20 to avoid vaccine issues
   ## for Burundi same source saying 0.6% which seems far too low
   N_PBS <- round(p_PBS * N_PBS)
-  
+
   ## HCWs: age 20-69 (from https://apps.who.int/nhwaportal/)
   w_HCW <- proportion_in_age_bins(group_bins["HCW", "start"],
                                   group_bins["HCW", "end"])
   N_HCW <- N_age * w_HCW
-  
-  if(region %in% c("equateur","sudkivu")){
+
+  if(region %in% c("equateur","sudkivu")) {
     p_HCW_default <- 136606 / sum(N_age)
-    } else if(region %in% c("burundi","bujumbura","bujumbura_mairie")){
+  } else if(region %in% c("burundi","bujumbura","bujumbura_mairie")) {
     p_HCW_default <- 11911 / sum(N_age)
-    }
-  
+  }
+
   p_HCW <- p_HCW %||% p_HCW_default
 
-   # possibly want to reduce this further to account for fact that not every HCW will have contact with mpox patients? 
+   # possibly want to reduce this further to account for fact that not
+   # every HCW will have contact with mpox patients?
   N_HCW <- round(p_HCW * N_HCW)
-  
+
   N <- c(N_age - N_ASW - N_PBS - N_CSW - N_HCW,
          CSW = sum(N_CSW),
          ASW = sum(N_ASW),
@@ -138,35 +139,44 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   } else {
     stop(sprintf("mixing_matrix %s not recognised", mixing_matrix))
   }
-  
-  ## need to do this with the squire age groups, rather than the new ones
-  M_raw <- t(t(m_age) * N_age_squire) # total daily contacts in population
-  
-  
-  ## balance the matrix so M[i,j] == M[j,i]
+
+  ## need to do this with the squire age groups, rather than the new
+  ## ones. This multiplies each column of m_age by the population of
+  ## that age group, meaning m_age each column j of m_age represents
+  ## the daily contacts from that age group j to all other age
+  ## groups. multiplying that out gives total number of daily contacts
+  ## from age group j to age group i in that population.
+  M_raw <- t(t(m_age) * N_age_squire)
+
+  ## Because the population demographics from the contact survey are
+  ## different from the population numbers we are using, the matrix is
+  ## unbalanced i.e. number of contacts from i to j are different to j
+  ## to i. This doesn't make sense as we assume these contacts are
+  ## symmetrical. We therefore make a balanced matrix with the average
+  ## number of i to j and j to i.
   M_age_squire <- (M_raw + t(M_raw)) / 2
   rownames(M_age_squire) <- colnames(M_age_squire) <- squire_age_bins$label
 
   # Adjust age groups to allow for new partition
   # [0-4], [5-9],  [10-14], [15-19], ... ->
   # [0-4], [5-11], [12-14], [15-19], ... ->
-  
+
   # partition contacts within 10-14 category between 10-11 = 0.4 and 12-14 = 0.6
   M_12to14_12to14 <- M_age_squire["10-14", "10-14"] * 0.6^2
   M_10to11_12to14 <- M_age_squire["10-14", "10-14"] * 2 * 0.4 * 0.6
   M_10to11_10to11 <- M_age_squire["10-14", "10-14"] * 0.4^2
-  
+
   # check equal
   stopifnot(M_10to11_10to11 + M_10to11_12to14 + M_12to14_12to14 ==
               M_age_squire["10-14", "10-14"])
-  
+
   # partition contacts between 5-9 and 10-14
-  M_05to09_10to11 <- M_age_squire["5-9", "10-14"] * (2 / 5) 
+  M_05to09_10to11 <- M_age_squire["5-9", "10-14"] * (2 / 5)
   M_05to09_12to14 <- M_age_squire["5-9", "10-14"] - M_05to09_10to11
-  
-  # compile contacts between 5-11 and 12-14 
+
+  # compile contacts between 5-11 and 12-14
   M_05to11_12to14 <- M_05to09_12to14 + M_10to11_12to14
-  
+
   # compile contacts between 5-11
   M_05to11_05to11 <- M_age_squire["5-9", "5-9"] + M_10to11_10to11 +
     M_05to09_10to11
@@ -175,11 +185,11 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   stopifnot(abs(M_05to11_05to11 + M_05to11_12to14 + M_12to14_12to14 -
               (M_age_squire["5-9", "5-9"] + M_age_squire["5-9", "10-14"] +
               M_age_squire["10-14", "10-14"])) < 1e-6)
-  
+
   M_10to11 <- M_age_squire["10-14", ] * 2 / 5
   M_12to14 <- M_age_squire["10-14", ] - M_10to11
   M_05to11 <- M_age_squire["5-9", ] + M_10to11
-  
+
   M_age <- M_age_squire
   rownames(M_age) <- colnames(M_age) <- age_bins$label
   M_age["5-11", ] <- M_age[, "5-11"] <- M_05to11
@@ -187,17 +197,17 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   M_age[c("5-11", "12-14"), c("5-11", "12-14")] <-
     matrix(c(M_05to11_05to11, M_05to11_12to14,
              M_05to11_12to14, M_12to14_12to14), nrow = 2)
-  
+
   M_age[lower.tri(M_age)] <- t(M_age)[lower.tri(M_age)] # populate lower triangle
   # check the totals match
   stopifnot(abs(sum(M_age[upper.tri(M_age, diag = TRUE)]) -
               sum(M_age_squire[upper.tri(M_age_squire, diag = TRUE)])) < 1e-6)
 
-  
+
   # Need to split total contacts i->j by gen pop / CSW / ASW / PBS
   # assume homogenous mixing in day-to-day contacts (will add sex in fitting)
   # create a matrix with the probability of being in each key pop by age
-  
+
   p_kp <- cbind(CSW = p_SW * w_CSW,
                 ASW = p_SW * w_ASW,
                 PBS = p_PBS * w_PBS,
@@ -212,9 +222,9 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   nms_group <- names(idx_compartment$group)
   n_group <- idx_compartment$dim$group
   n_age <- nrow(age_bins)
-  
+
   M <- matrix(0, n_group, n_group,  dimnames = list(nms_group, nms_group))
-  
+
   ## Take the unique entries of M_age (upper triangular including diagonal) and
   ## Consider one by one, splitting into gen <-> gen / gen <-> key / key <-> key
   ## contacts for each i,j combo
@@ -229,18 +239,18 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
       # Separate out gen pop -> gen pop contacts and assign to age group
       M[i, j] <- n["gen", "gen"]
       # Count contacts between gen pop age group i and key pops aged j
-      # Add to total contacts between age group i and each key pop. 
+      # Add to total contacts between age group i and each key pop.
       # Repeat for age j as we only consider upper triangular so must allocate
       # all of M_age[i, j]. This holds for i=j as p separates this out into
       # 1.gen aged i -> 2.key aged i; and 1.key aged i -> 2.gen aged i
-      M[i, nms_kp] <- M[i, nms_kp] + n["gen", nms_kp] 
+      M[i, nms_kp] <- M[i, nms_kp] + n["gen", nms_kp]
       M[j, nms_kp] <- M[j, nms_kp] + n[nms_kp, "gen"]
 
       # Count contacts between key pops aged i and key pops aged j
       n_kp <- n[nms_kp, nms_kp]
       # add in reverse direction contacts (as described above), omitting diagonal
       # to avoid double counting
-      M[nms_kp, nms_kp] <- M[nms_kp, nms_kp] + n_kp + t(n_kp * lower.tri(n_kp)) 
+      M[nms_kp, nms_kp] <- M[nms_kp, nms_kp] + n_kp + t(n_kp * lower.tri(n_kp))
 
     }
   }
@@ -250,17 +260,14 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
   # check the totals match
   # stopifnot(abs(sum(M_age[upper.tri(M_age, diag = TRUE)]) -
   #                 sum(M[upper.tri(M, diag = TRUE)])) < 1e-6)
-  
-  
-  
-  
+
   # Convert to per-capita rates by dividing by population
   # Resulting matrix is Asymmetric c_ij != c_ji
   # BUT total number of contacts i->j and j->i is balanced
   m <- M / N
   # correct for any zero population denominators (e.g. HCW)
   m[N == 0, ] <- m[, N == 0] <- 0
-  
+
 
 
   ## set up sexual contact matrix for parameterisation in transform function
@@ -286,7 +293,7 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
     p_unvaccinated[which(age_bins$start >= 55)] <-
       c(0.23, 0.21, 0.21, 0.21, 0.21)
   }
-  
+
   p_unvaccinated[nms_kp] <- 1 # assume no prior vaccination in KPs
 
   list(
@@ -306,12 +313,12 @@ parameters_demographic <- function(region, mixing_matrix = "Zimbabwe",
 
 
 ##' A function that gets the age bins used in the model.
-##' 
+##'
 ##' @title Get age bins for use in the model
-##' 
+##'
 ##' @return A data frame containing the labels for the age bins, and their
 ##'   start and end values
-##'   
+##'
 ##' @export
 get_age_bins <- function() {
   ## We always use these age bands, so rather than detect them, we will
@@ -330,34 +337,34 @@ create_age_bins <- function(start, max_age = 100) {
 
 ##' A function that calculates the proportion of each age group than lies inside
 ##' a given interval
-##' 
+##'
 ##' @title calculate the proportion of each age group that lies between `min_age`
 ##' and `max_age` (inclusive) based on uniform distribution within each age band
 ##' @param min_age a scalar giving the bottom of the age range
 ##' @param max_age a scalar giving the top of the age range
 ##' @return a vector of length n_age = 16 giving the proportion for each age band
-##'   
+##'
 proportion_in_age_bins <- function(min_age, max_age) {
   bins <- get_age_bins()
-  
+
   # Calculate the overlap range for each bin
   overlap_start <- pmax(bins$start, min_age)
   overlap_end <- pmin(bins$end, max_age)
-  
+
   # Calculate the size of the bin and the overlap
   bin_size <- bins$end - bins$start + 1
   overlap_size <- pmax(0, overlap_end - overlap_start + 1)
-  
+
   # Calculate the proportion of overlap for each bin
   proportions <- overlap_size / bin_size
-  
+
   proportions
 }
 
 ##' A function that gets the compartment indices used in the model
-##' 
+##'
 ##' @title Get compartment indices used throughout the model
-##' 
+##'
 ##' @return A list containing entries: `dim` giving the dimensions of each
 ##' compartment, currently: group = 18, vax = 4;
 ##' `group`, a named list of the array indices corresponding to the
@@ -365,10 +372,10 @@ proportion_in_age_bins <- function(min_age, max_age) {
 ##' and `vax`, a named list of the vaccine strata used in
 ##' the second dimension of model compartments:
 ##' 1. historic smallpox; 2. unvaccinated; 3. one-dose; 4. two-dose.
-##' 
+##'
 ##' Use this function wherever you need to refer to these standards in your code
 ##' to avoid duplication, and make modifying universally easier.
-##'   
+##'
 ##' @export
 get_compartment_indices <- function() {
   group_bins <- get_group_bins()
@@ -376,11 +383,11 @@ get_compartment_indices <- function() {
 
   groups <- seq_len(n_group)
   names(groups) <- group_bins$label
-  
+
   n_vax <- 4
   vax_strata <- seq_len(n_vax)
   names(vax_strata) <- c("historic", "unvaccinated", "one_dose", "two_dose")
-  
+
   list(dim = list(group = n_group, vax = n_vax),
        group = as.list(groups),
        vax = as.list(vax_strata))
@@ -389,11 +396,11 @@ get_compartment_indices <- function() {
 
 ## A function that indicates whether the group is classed as an adult or child, and for the border case what the prop is
 get_group_bins <- function() {
-  
+
   age_bins <- get_age_bins()
   age_bins$children <- proportion_in_age_bins(0, 11)
   age_bins$fifteen_plus <- 1 - proportion_in_age_bins(0,14)
-  
+
   groups <- data.frame(label = c("CSW", "ASW", "PBS", "HCW"),
                        start = c(12, 18, 20, 20),
                        end = c(17, 49, 49, 69),
@@ -401,7 +408,7 @@ get_group_bins <- function() {
                        fifteen_plus = c(0.5,1,1,1))
   ret <- rbind(age_bins, groups)
   ret$adults <- 1 - ret$children
-  
+
   ret
 }
 
@@ -427,20 +434,20 @@ assign_seeds <- function(N, w) {
   }
 
 ##' A function that gets the fixed parameters for use in the model
-##' 
+##'
 ##' @title Get fixed parameters for use in the model
 ##' @inheritParams parameters_demographic
-##'   
+##'
 ##' @param initial_infections The initial number of infections
 ##' @param use_ve_D logical, indicating whether model should allow for vaccine
 ##' efficacy against death (above and beyond protection against infection)
 ##' @param overrides A list, containing any parameters for which you want to
 ##'   override the default values
-##' 
+##'
 ##' @return A list of the fixed parameters
-##'   
+##'
 ##' @export
-##' 
+##'
 #' @export
 parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
                              mixing_matrix = "Zimbabwe", p_SW = NULL,
@@ -465,7 +472,7 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
   n_vax <- demographic_params$n_vax
   idx_unvax <- idx_compartment$vax$unvaccinated
   idx_historic_vax <- idx_compartment$vax$historic
-  
+
   ## standard vaccination parameters, we may want to move this entire section to
   ## the transform in future if we want to allow for vaccine uncertainty
   ## VE against infection
@@ -473,19 +480,17 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
                  nrow = n_group, ncol = n_vax, byrow = TRUE) ##VALUES TO BE UPDATED
   ## VE against onward transmission
   ve_T <- rep(0, n_vax)
-  
-  
+
   N <- demographic_params$province_pop[[region]]
   N0 <- round(N * demographic_params$N0 / sum(demographic_params$N0)) # total number in each age-group
   ## ages: 0-4, 5-11, 12-14, 15-19, 20+
   RR_z <- c(1, 0.857, 0.438, 0.086, rep(0.073, n_group - 4)) # Jezek 1988 zoonotic + Jezek 1987
-  
 
   ## Seed infections in the unvaccinated group in a region-specific manner
   X0 <- matrix(0, nrow = n_group, ncol = n_vax)
   seed_rate <- X0
 
-  
+
   if (region %in% c("sudkivu","burundi","bujumbura","bujumbura_mairie")) { # seeding in sex workers in Clade Ib affected areas
 
     ## Extract sex-worker index and put initial infections in this group (unvaccinated strata)
@@ -496,13 +501,13 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
 
     ## Extract gen-pop index and put initial infections in this group (unvaccinated strata) in proportion to zoonotic risk
     index_gen_pop <- seq_len(nrow(age_bins))
-    seeding_infections <- initial_infections * 
+    seeding_infections <- initial_infections *
       RR_z[index_gen_pop] / sum(RR_z[index_gen_pop])
 
     seed_rate[index_gen_pop, idx_unvax] <- seeding_infections
 
   }
-  
+
   p_unvaccinated <- demographic_params$p_unvaccinated
   ## update with assignment into smallpox vaccination compartment (j = 1)
   ## if we have a small population then seeding with 5 infections per compt and
@@ -527,10 +532,10 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
   # Create matrix [group | vax strata]
   # Vax strata: 1. historic smallpox; 2. unvaccinated; 3. one-dose; 4. two-dose
   # initially all strata contain CFR by age for unvaccinated, which we then
-  # modify to incorporate any VE against death 
+  # modify to incorporate any VE against death
   CFR <- matrix(CFR_unvax, nrow = n_group, ncol = n_vax)
   rownames(CFR) <- names(CFR_unvax)
-  
+
   if (use_ve_D) {
   # If allowing for vaccine protection against death
     CFR_historic_vax <- CFR_unvax
@@ -541,25 +546,25 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
     # use same CFR for all vaccinated regardless of efficacy
     CFR[, -idx_unvax] <- CFR_historic_vax
   }
-  
+
   group_bins <- get_group_bins()
-  
+browser()
   CFR["ASW", ] <- colMeans(CFR[which(age_bins$start>=group_bins$start[which(group_bins$label=="CSW")]&age_bins$end<=group_bins$end[which(group_bins$label=="ASW")]),])
   CFR["CSW", ] <- CFR["ASW", ]
   CFR["PBS", ] <- colMeans(CFR[which(age_bins$start>=group_bins$start[which(group_bins$label=="PBS")]&age_bins$end<=group_bins$end[which(group_bins$label=="PBS")]),])
   CFR["HCW", ] <- colMeans(CFR[which(age_bins$start>=group_bins$start[which(group_bins$label=="HCW")]&age_bins$end<=group_bins$end[which(group_bins$label=="HCW")]),])
-  
-  ## vaccination default 
-  
+
+  ## vaccination default
+
   ## Initially final coverage within children / adults is set to be the proportion
-  ## in each age group (i.e. 100% coverage, given age). For example, 15-19yo 
+  ## in each age group (i.e. 100% coverage, given age). For example, 15-19yo
   ## would have 60% target coverage of the child vaccines and 40% of the adult
-  ## This may cause issues in future if vaccines that can be given to adults / 
+  ## This may cause issues in future if vaccines that can be given to adults /
   ## children have different efficacies.
-  
+
   N_prioritisation_steps_children <- 1
   N_prioritisation_steps_adults <- 1
-  
+
   group_bins <- get_group_bins()
   prioritisation_strategy_children <- matrix(group_bins$children,
                                              nrow = n_group,
@@ -567,7 +572,7 @@ parameters_fixed <- function(region, initial_infections, use_ve_D = FALSE,
   prioritisation_strategy_adults <- matrix(group_bins$adults,
                                              nrow = n_group,
                                              ncol = N_prioritisation_steps_adults)
-  
+
   params_list = list(
     region = region,
     n_group = n_group,
